@@ -136,3 +136,20 @@ def parse_page(data: str, identifer: str, boardconfig: str = None) -> dict:
         response['keys'].append(image)
 
     return response
+
+
+async def main():
+    # Пример использования с отключенной проверкой SSL
+    connector = aiohttp.TCPConnector(ssl=False)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        try:
+            wikitext = await get_key_page(session, "iPhone10,6", "20G81")
+            parsed_data = parse_page(wikitext, "iPhone10,6")
+            print(parsed_data)
+        except Exception as e:
+            print(f"Error: {e}")
+
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
