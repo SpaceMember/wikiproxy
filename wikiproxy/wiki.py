@@ -20,7 +20,7 @@ async def get_key_page(
         'format': 'json',
         'srnamespace': '2304',
     }
-    async with session.get('http://theapplewiki.com/api.php', params=params) as resp:
+    async with session.get('https://theapplewiki.com/api.php', params=params) as resp:
         if resp.status != 200:
             pass  # raise error
         else:
@@ -38,7 +38,7 @@ async def get_key_page(
         'format': 'json',
         'formatversion': 2,
     }
-    async with session.get('http://theapplewiki.com/api.php', params=params) as resp:
+    async with session.get('https://theapplewiki.com/api.php', params=params) as resp:
         if resp.status != 200:
             pass  # raise error
 
