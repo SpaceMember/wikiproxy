@@ -22,9 +22,8 @@ async def get_key_page(
     }
     async with session.get('https://theapplewiki.com/api.php', params=params) as resp:
         if resp.status != 200:
-            pass  # raise error
-        else:
-            search = await resp.json()
+            raise ValueError(f'API request failed with status {resp.status}')
+        search = await resp.json()
 
     if search['query']['searchinfo']['totalhits'] == 0:
         raise ValueError(
@@ -40,14 +39,13 @@ async def get_key_page(
     }
     async with session.get('https://theapplewiki.com/api.php', params=params) as resp:
         if resp.status != 200:
-            pass  # raise error
-
+            raise ValueError(f'API request failed with status {resp.status}')
         data = await resp.json()
 
     return data['parse']['wikitext']
 
 
-def parse_page(data: str, identifer: str, boardconfig: str = None) -> dict:
+def parse_page(data: str, identifier: str, boardconfig: str = None) -> dict:
     # Have to coerce wikitextparser into recognizing it as a table for easy parsing
     data = (
         ' '.join([x for x in data.split(' ') if x != ''])
@@ -58,6 +56,8 @@ def parse_page(data: str, identifer: str, boardconfig: str = None) -> dict:
     page = wtp.parse(data)
     page_data = {}
     for entry in page.tables[0].data()[0]:
+        if ' = ' not in entry:
+            continue
         key, item = entry.split(' = ')
         page_data[key] = item
 
@@ -67,11 +67,11 @@ def parse_page(data: str, identifer: str, boardconfig: str = None) -> dict:
 
         if boardconfig.lower() not in [x.lower() for x in page_data.values()]:
             raise ValueError(
-                f'Boardconfig: {boardconfig} for device: {identifer} is not valid!'
+                f'Boardconfig: {boardconfig} for device: {identifier} is not valid!'
             )
 
-        if page_data['Model2'].lower() == boardconfig.lower():
-            keys_list = list(page_data.keys())  # Cannot iterate over dict
+        if 'Model2' in page_data and page_data['Model2'].lower() == boardconfig.lower():
+            keys_list = list(page_data.keys())
             for key in keys_list:
                 if '2' in key:
                     page_data[key.replace('2', '')] = page_data[key]
@@ -81,11 +81,11 @@ def parse_page(data: str, identifer: str, boardconfig: str = None) -> dict:
                 del page_data[key]
 
     response = {
-        'identifier': page_data['Device'],
-        'buildid': page_data['Build'],
-        'codename': page_data['Codename'],
-        'restoreramdiskexists': 'RestoreRamdisk' in page_data,
+        'identifier': page_data.get('Device', identifier),
+        'buildid': page_data.get('Build', ''),
+        'codename': page_data.get('Codename', ''),
         'updateramdiskexists': 'UpdateRamdisk' in page_data,
+        'restoreramdiskexists': 'RestoreRamdisk' in page_data,
         'keys': [],
     }
 
@@ -113,26 +113,37 @@ def parse_page(data: str, identifer: str, boardconfig: str = None) -> dict:
         if any(component == x for x in ('RootFS', 'RestoreRamdisk', 'UpdateRamdisk')):
             image['filename'] += '.dmg'
 
-        for key in ('IV', 'Key') if component != 'RootFS' else ('Key',):
-            if component + key not in page_data.keys():
-                continue
-
-            if all(
-                x not in page_data[component + key]
-                for x in ('Unknown', 'Not Encrypted')
+        # Add IV, Key and KBAG if available
+        for key_type in ('IV', 'Key', 'KBAG'):
+            key_name = component + key_type
+            if key_name in page_data and all(
+                x not in page_data[key_name] for x in ('Unknown', 'Not Encrypted')
             ):
-                image[key.lower()] = page_data[component + key]
+                image[key_type.lower()] = page_data[key_name]
 
-        if (
-            ('iv' not in image.keys())
-            and ('key' not in image.keys())
-            and not image['filename'].endswith('.dmg')
-        ):
-            continue
-
-        if 'iv' in image and 'key' in image:
-            image['kbag'] = image['iv'] + image['key']
-
-        response['keys'].append(image)
+        # Only add if we have at least IV+Key or KBAG
+        if (('iv' in image and 'key' in image) or 'kbag' in image):
+            response['keys'].append(image)
 
     return response
+
+
+async def get_keys(
+    session: aiohttp.ClientSession, 
+    device: str, 
+    buildid: str, 
+    boardconfig: str = None
+) -> dict:
+    try:
+        wikitext = await get_key_page(session, device, buildid)
+        return parse_page(wikitext, device, boardconfig)
+    except Exception as e:
+        return {
+            'error': str(e),
+            'identifier': device,
+            'buildid': buildid,
+            'codename': '',
+            'updateramdiskexists': False,
+            'restoreramdiskexists': False,
+            'keys': []
+        }
